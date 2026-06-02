@@ -212,7 +212,7 @@ if (startBtn) {
         const surname = state.surname.trim();
         const age = state.age.trim();
         if (!name || !surname || !age) {
-            alert('Пожалуйста, заполните имя, фамилию и возраст!');
+            showGameAlert('Пожалуйста, заполните имя, фамилию и возраст!');
             return;
         }
         modal.classList.remove('open');
@@ -371,7 +371,7 @@ function updateMoneyDisplay() {
     if (el) el.textContent = playerMoney.toLocaleString('ru');
 }
 
-function onMarketClick(e) {
+async function onMarketClick(e) {
     const tile = e.currentTarget;
     const x = parseInt(tile.dataset.x);
     const y = parseInt(tile.dataset.y);
@@ -381,16 +381,28 @@ function onMarketClick(e) {
         currentShopId = existing.id;
         updateShopModal();
         shopModal.classList.add('open');
+        showShopPricesPanel();
         return;
     }
 
     if (playerMoney < SHOP_COST) {
-        alert('Недостаточно средств! Установка лавки стоит ' + SHOP_COST.toLocaleString('ru') + '₽');
+        await showGameAlert('Недостаточно средств! Установка лавки стоит ' + SHOP_COST.toLocaleString('ru') + '₽');
         return;
     }
 
-    const name = prompt('Название лавки:', 'Лавка №' + (shops.length + 1));
-    if (!name || !name.trim()) return;
+    // Prompt for shop name using a styled modal
+    const name = await new Promise(resolve => {
+        showGameDialog('Название лавки', `
+            <input class="dialog-input" id="gameShopNameInput" type="text" value="Лавка №${shops.length + 1}" autofocus>
+        `, [
+            { label: 'Построить', val: 'ok', cls: 'confirm' },
+            { label: 'Отмена', val: 'cancel', cls: 'cancel' }
+        ]).then(() => {
+            const inp = document.getElementById('gameShopNameInput');
+            resolve(inp ? inp.value.trim() : '');
+        });
+    });
+    if (!name) return;
 
     playerMoney -= SHOP_COST;
     updateMoneyDisplay();
@@ -399,7 +411,7 @@ function onMarketClick(e) {
         id: Date.now(),
         name: name.trim(),
         x, y,
-        storage: { level: 1, capacity: 10, used: 0, items: {} },
+        storage: { level: 1, capacity: 20, used: 0, items: {} },
         shelf: { level: 1, capacity: 10, used: 0, items: {} },
         sellingPrices: {}
     };
@@ -459,7 +471,7 @@ function startGame() {
 const loadBtn = document.getElementById('loadGameBtn');
 if (loadBtn) {
     loadBtn.addEventListener('click', () => {
-        alert('Нет сохранённых игр.');
+        showGameAlert('Нет сохранённых игр.');
     });
 }
 
@@ -487,6 +499,105 @@ function updateXPDisplay() {
     const text = document.getElementById('xpText');
     if (fill) fill.style.width = Math.min(100, (playerXP / xpToNext) * 100) + '%';
     if (text) text.textContent = playerXP + ' / ' + xpToNext;
+}
+
+// ========== Game Dialog (styled alert/prompt/select) ==========
+
+function showGameDialog(title, bodyHTML, actions) {
+    // Re-query to get fresh references after any clone/replace
+    const dlg = document.getElementById('gameDialog');
+    const dlgTitle = document.getElementById('gameDialogTitle');
+    const dlgBody = document.getElementById('gameDialogBody');
+    const dlgActions = document.getElementById('gameDialogActions');
+
+    // Clone and replace to strip old event listeners
+    const newActions = dlgActions.cloneNode(false);
+    dlgActions.parentNode.replaceChild(newActions, dlgActions);
+    const newBody = dlgBody.cloneNode(false);
+    dlgBody.parentNode.replaceChild(newBody, dlgBody);
+
+    newActions.innerHTML = actions.map(a =>
+        `<button class="dialog-btn ${a.cls || ''}" data-val="${a.val}">${a.label}</button>`
+    ).join('');
+    newBody.innerHTML = bodyHTML;
+
+    dlgTitle.textContent = title;
+    dlg.classList.add('open');
+
+    return new Promise((resolve) => {
+        let settled = false;
+        function close(val) {
+            if (settled) return;
+            settled = true;
+            dlg.classList.remove('open');
+            resolve(val);
+        }
+
+        newActions.addEventListener('click', function handler(e) {
+            const btn = e.target.closest('.dialog-btn');
+            if (!btn) return;
+            close(btn.dataset.val);
+        });
+
+        newBody.addEventListener('click', function handler(e) {
+            const item = e.target.closest('.dialog-select-item');
+            if (!item) return;
+            close(item.dataset.idx);
+        });
+
+        dlg.addEventListener('click', function handler(e) {
+            if (e.target === dlg) close(null);
+        });
+
+        setTimeout(() => {
+            const inp = newBody.querySelector('.dialog-input');
+            if (inp) inp.focus();
+        }, 50);
+    });
+}
+
+// Quick quantity buttons for buy dialog
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.qty-btn');
+    if (!btn) return;
+    const input = document.getElementById('gamePromptInput');
+    if (!input) return;
+    const add = parseInt(btn.dataset.add, 10);
+    if (!add) return;
+    input.value = (parseInt(input.value, 10) || 0) + add;
+});
+
+function showGameAlert(msg) {
+    return showGameDialog('', `<div class="dialog-label">${msg}</div>`, [
+        { label: 'OK', val: 'ok', cls: 'confirm' }
+    ]);
+}
+
+async function showGamePrompt(msg, defaultValue) {
+    const result = await showGameDialog('', `
+        <label class="dialog-label">${msg}</label>
+        <input class="dialog-input" id="gamePromptInput" type="number" min="1" value="${defaultValue}" autofocus>
+    `, [
+        { label: 'OK', val: 'ok', cls: 'confirm' },
+        { label: 'Отмена', val: 'cancel', cls: 'cancel' }
+    ]);
+    if (result === 'cancel' || result == null) return null;
+    const input = document.getElementById('gamePromptInput');
+    return input ? parseInt(input.value, 10) : null;
+}
+
+async function showGameSelect(msg, items) {
+    const listHtml = items.map((item, i) =>
+        `<button class="dialog-select-item" data-idx="${i}">${item.label}</button>`
+    ).join('');
+    const idx = await showGameDialog('', `
+        <label class="dialog-label">${msg}</label>
+        ${listHtml}
+    `, [
+        { label: 'Отмена', val: 'cancel', cls: 'cancel' }
+    ]);
+    if (idx == null || idx === 'cancel') return -1;
+    return parseInt(idx, 10);
 }
 
 // ========== Suppliers ==========
@@ -534,11 +645,11 @@ const FRESH_PRODUCTS = [
 // ========== Pricing System ==========
 
 let productPrices = {};
-let currentWeek = -1;
+let currentSupplierPeriod = -1;
 
 function initProductPrices() {
     productPrices = {};
-    currentWeek = getGameWeek();
+    currentSupplierPeriod = getSupplierPeriod();
     FRESH_PRODUCTS.forEach(p => {
         const mult = 0.3 + Math.random() * 1.4;
         productPrices[p.name] = {
@@ -550,18 +661,18 @@ function initProductPrices() {
     });
 }
 
-function getGameWeek() {
+function getSupplierPeriod() {
     const start = new Date(2026, 0, 1, 8, 0, 0);
     const diff = gameDate - start;
-    return Math.floor(diff / (7 * 24 * 60 * 60 * 1000));
+    return Math.floor(diff / (3 * 24 * 60 * 60 * 1000));
 }
 
 function updatePrices(gameMinutesPassed) {
     if (!gameDate) return;
 
-    const week = getGameWeek();
-    if (week !== currentWeek) {
-        currentWeek = week;
+    const period = getSupplierPeriod();
+    if (period !== currentSupplierPeriod) {
+        currentSupplierPeriod = period;
         FRESH_PRODUCTS.forEach(p => {
             const pp = productPrices[p.name];
             if (!pp) return;
@@ -627,7 +738,7 @@ function initMarketPrices() {
 function getMarketPeriod() {
     const start = new Date(2026, 0, 1, 8, 0, 0);
     const diff = gameDate - start;
-    return Math.floor(diff / (3 * 24 * 60 * 60 * 1000));
+    return Math.floor(diff / (24 * 60 * 60 * 1000));
 }
 
 function updateMarketPrices(gameMinutesPassed) {
@@ -698,7 +809,7 @@ function processCustomers(gameMinutesPassed) {
             shop.shelf.items[name] -= buyQty;
             shop.shelf.used -= buyQty;
             playerMoney += sellPrice * buyQty;
-            addXP(2 * buyQty);
+            addXP(4 * buyQty);
         }
     }
     updateMoneyDisplay();
@@ -772,8 +883,8 @@ function savePrices() {
 }
 
 if (pricesBtn && pricesModal) {
-    pricesBtn.addEventListener('click', () => {
-        if (shops.length === 0) { alert('Сначала постройте лавку!'); return; }
+    pricesBtn.addEventListener('click', async () => {
+        if (shops.length === 0) { await showGameAlert('Сначала постройте лавку!'); return; }
         // Reset to editor tab
         document.querySelectorAll('.prices-tab').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.prices-tab-content').forEach(c => c.style.display = 'none');
@@ -955,8 +1066,6 @@ function renderSuppliers() {
     const checkSvg = '<svg viewBox="0 0 12 12" width="10" height="10"><path d="M2.5 6l2.5 2.5 4.5-5" fill="none" stroke="#6db86d" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     const lockSm = '<svg viewBox="0 0 10 10" width="8" height="8"><rect x="1.5" y="4" width="7" height="5" fill="#555" rx=".8"/><path d="M3 4V2.5a2 2 0 114 0V4" fill="none" stroke="#555" stroke-width="1"/></svg>';
 
-    const buySvg = '<svg viewBox="0 0 12 12" width="8" height="8"><path d="M2 3h2l1.5 5h4L11 5H4" fill="none" stroke="#6db86d" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="5" cy="9.5" r=".8" fill="#6db86d"/><circle cx="9" cy="9.5" r=".8" fill="#6db86d"/></svg>';
-
     if (foodGrid) {
         foodGrid.innerHTML = SUPPLIERS.food.map(s => {
             const locked = playerLevel < s.levelReq;
@@ -967,10 +1076,9 @@ function renderSuppliers() {
                         const pLocked = playerLevel < p.levelReq;
                         const pp = productPrices[p.name];
                         const price = pp ? pp.currentPrice + '₽' : '—';
-                        return `<div class="product-item${pLocked ? ' locked' : ''}">
+                        return `<div class="product-item${pLocked ? ' locked' : ''}"${!pLocked ? ' data-product="' + p.name + '"' : ''}>
                             <span class="product-name">${pLocked ? lockSm : ''} ${p.name}</span>
                             <span class="product-price">${price}</span>
-                            ${!pLocked ? `<button class="product-buy" data-product="${p.name}">${buySvg}</button>` : ''}
                             <span class="product-lvl">ур.${p.levelReq}</span>
                         </div>`;
                     }).join('') + '</div>';
@@ -1054,21 +1162,44 @@ function updateSidebarBtns() {
     }
 }
 
-function buyProduct(productName) {
+async function buyProduct(productName) {
     const pp = productPrices[productName];
     if (!pp) return;
 
     if (shops.length === 0) {
-        alert('Сначала постройте лавку!');
+        await showGameAlert('Сначала постройте лавку!');
         return;
     }
 
-    const qty = parseInt(prompt('Сколько единиц купить?', '1'), 10);
+    const mp = marketPrices[productName];
+    const marketPrice = mp ? mp.currentPrice : '—';
+    const supplierPrice = pp.currentPrice;
+
+    const result = await showGameDialog('', `
+        <div style="font-size:10px;color:#e0e0e0;text-align:center;margin-bottom:8px;text-shadow:1px 1px 0 #000">${productName}</div>
+        <div style="display:flex;justify-content:space-between;font-size:7px;margin-bottom:10px">
+            <span style="color:#d4a060">Закупка: ${supplierPrice}₽</span>
+            <span style="color:#e8c547">Рынок: ${marketPrice}₽</span>
+        </div>
+        <label class="dialog-label">Количество:</label>
+        <input class="dialog-input" id="gamePromptInput" type="number" min="0" value="0" autofocus>
+        <div style="display:flex;gap:4px;margin-top:6px;justify-content:center">
+            <button class="qty-btn" data-add="5">+5</button>
+            <button class="qty-btn" data-add="10">+10</button>
+            <button class="qty-btn" data-add="50">+50</button>
+        </div>
+    `, [
+        { label: 'Купить', val: 'ok', cls: 'confirm' },
+        { label: 'Отмена', val: 'cancel', cls: 'cancel' }
+    ]);
+    if (result === 'cancel' || result == null) return;
+    const input = document.getElementById('gamePromptInput');
+    const qty = input ? parseInt(input.value, 10) : 0;
     if (!qty || qty <= 0) return;
 
     const total = pp.currentPrice * qty;
     if (playerMoney < total) {
-        alert('Недостаточно средств! Нужно: ' + total.toLocaleString('ru') + '₽, есть: ' + playerMoney.toLocaleString('ru') + '₽');
+        await showGameAlert('Недостаточно средств! Нужно: ' + total.toLocaleString('ru') + '₽, есть: ' + playerMoney.toLocaleString('ru') + '₽');
         return;
     }
 
@@ -1077,15 +1208,15 @@ function buyProduct(productName) {
     if (shops.length === 1) {
         shop = shops[0];
     } else {
-        const list = shops.map((s, i) => (i + 1) + ' — ' + s.name).join('\n');
-        const idx = parseInt(prompt('В какую лавку доставить?\n' + list, '1'), 10);
-        if (!idx || idx < 1 || idx > shops.length) return;
-        shop = shops[idx - 1];
+        const items = shops.map(s => ({ label: s.name }));
+        const idx = await showGameSelect('В какую лавку доставить?', items);
+        if (idx < 0 || idx >= shops.length) return;
+        shop = shops[idx];
     }
 
     const free = shop.storage.capacity - shop.storage.used;
     if (free < qty) {
-        alert('Недостаточно места на складе в «' + shop.name + '»! Свободно: ' + free + ' ед., нужно: ' + qty + ' ед.');
+        await showGameAlert('Недостаточно места на складе в «' + shop.name + '»! Свободно: ' + free + ' ед., нужно: ' + qty + ' ед.');
         return;
     }
 
@@ -1097,15 +1228,15 @@ function buyProduct(productName) {
     deliveries.push({ shopId: shop.id, productName, qty, arriveAt });
 
     renderSuppliers();
-    alert('Заказ оформлен! Доставка в «' + shop.name + '» через ' + hours + ' ч.');
+    await showGameAlert('Заказ оформлен! Доставка в «' + shop.name + '» через ' + hours + ' ч.');
 }
 
 if (suppliersBtn && suppliersModal) {
     updateSidebarBtns();
 
-    suppliersBtn.addEventListener('click', () => {
+    suppliersBtn.addEventListener('click', async () => {
         if (shops.length === 0) {
-            alert('Сначала установите лавку!');
+            await showGameAlert('Сначала установите лавку!');
             return;
         }
         renderSuppliers();
@@ -1117,9 +1248,9 @@ if (suppliersBtn && suppliersModal) {
             suppliersModal.classList.remove('open');
             return;
         }
-        const buyBtn = e.target.closest('.product-buy');
-        if (buyBtn) {
-            buyProduct(buyBtn.dataset.product);
+        const item = e.target.closest('.product-item:not(.locked)');
+        if (item && item.dataset.product) {
+            buyProduct(item.dataset.product);
         }
     });
 
@@ -1162,10 +1293,9 @@ function updateShopModal() {
             stItems.innerHTML = '<div class="shop-items-empty">Склад пуст</div>';
         } else {
             stItems.innerHTML = entries.map(([name, qty]) =>
-                `<div class="shop-item">
+                `<div class="shop-item" data-product="${name}" data-location="storage">
                     <span class="shop-item-name">${name}</span>
                     <span class="shop-item-qty">${qty} ед.</span>
-                    <button class="shop-item-move" data-product="${name}" title="Переместить на полку">→</button>
                 </div>`
             ).join('');
         }
@@ -1183,7 +1313,7 @@ function updateShopModal() {
             shItems.innerHTML = '<div class="shop-items-empty">Полка пуста</div>';
         } else {
             shItems.innerHTML = entries.map(([name, qty]) =>
-                `<div class="shop-item">
+                `<div class="shop-item" data-product="${name}" data-location="shelf">
                     <span class="shop-item-name">${name}</span>
                     <span class="shop-item-qty">${qty} ед.</span>
                 </div>`
@@ -1227,21 +1357,237 @@ function updateShopModal() {
         shBtn.textContent = '+ Полка 5 000₽';
         shBtn.classList.remove('maxed');
     }
+
+    if (spp.classList.contains('open')) updateShopPricesPanel();
 }
 
-function moveToShelf(productName) {
+// ========== Item Context Menu (Storage/Shelf) ==========
+
+const itemMenu = document.getElementById('itemMenu');
+const itemMenuTitle = document.getElementById('itemMenuTitle');
+
+let itemMenuContext = null; // { product, location, sourceShopId }
+
+function hideItemMenu() {
+    itemMenu.classList.remove('open');
+    itemMenuContext = null;
+}
+
+function showItemMenu(e, product, location) {
+    itemMenuContext = { product, location, sourceShopId: currentShopId };
     const shop = getCurrentShop();
+    const fromStorage = location === 'storage';
+
+    itemMenuTitle.textContent = product + ' (' + (fromStorage ? 'склад' : 'полка') + ')';
+
+    // Show/hide buttons based on location
+    itemMenu.querySelector('[data-action="toShelf"]').style.display = fromStorage ? '' : 'none';
+    itemMenu.querySelector('[data-action="toStorage"]').style.display = fromStorage ? 'none' : '';
+
+    // Disable "to other shop" if only 1 shop
+    const otherBtn = itemMenu.querySelector('[data-action="toOtherShop"]');
+    otherBtn.disabled = shops.length < 2;
+
+    // Position near click
+    const x = Math.min(e.clientX, window.innerWidth - 160);
+    const y = Math.min(e.clientY, window.innerHeight - 180);
+    itemMenu.style.left = Math.max(4, x) + 'px';
+    itemMenu.style.top = Math.max(4, y) + 'px';
+
+    itemMenu.classList.add('open');
+}
+
+// Click on shop item → show menu
+document.addEventListener('click', (e) => {
+    const item = e.target.closest('.shop-item');
+    if (item && item.dataset.product) {
+        const product = item.dataset.product;
+        const location = item.dataset.location;
+        const shop = getCurrentShop();
+        if (!shop) return;
+        const qty = location === 'storage'
+            ? (shop.storage.items[product] || 0)
+            : (shop.shelf.items[product] || 0);
+        if (qty <= 0) return;
+        e.stopPropagation();
+        showItemMenu(e, product, location);
+    }
+});
+
+// Click on menu action
+itemMenu.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.item-menu-btn');
+    if (!btn || btn.disabled) return;
+    const action = btn.dataset.action;
+    const ctx = itemMenuContext;
+    if (!ctx) return;
+    hideItemMenu();
+
+    const shop = shops.find(s => s.id === ctx.sourceShopId);
     if (!shop) return;
-    if (shop.storage.items[productName] <= 0) return;
-    if (shop.shelf.used >= shop.shelf.capacity) {
-        alert('Полка заполнена!');
+
+    const source = ctx.location === 'storage' ? shop.storage : shop.shelf;
+    const available = source.items[ctx.product] || 0;
+    if (available <= 0) return;
+
+    if (action === 'discard') {
+        const qty = await showGamePrompt('Сколько выбросить? (есть: ' + available + ')', '1');
+        if (!qty || qty <= 0) return;
+        const toRemove = Math.min(qty, available);
+        source.items[ctx.product] -= toRemove;
+        source.used -= toRemove;
+        if (source.items[ctx.product] <= 0) delete source.items[ctx.product];
+        updateShopModal();
         return;
     }
-    shop.storage.items[productName]--;
-    shop.storage.used--;
-    shop.shelf.items[productName] = (shop.shelf.items[productName] || 0) + 1;
-    shop.shelf.used++;
-    updateShopModal();
+
+    if (action === 'toShelf') {
+        const free = shop.shelf.capacity - shop.shelf.used;
+        if (free <= 0) { await showGameAlert('Полка заполнена!'); return; }
+        const maxQty = Math.min(available, free);
+        const qty = await showGamePrompt('Сколько переместить на полку? (доступно: ' + maxQty + ')', String(maxQty));
+        if (!qty || qty <= 0) return;
+        const toMove = Math.min(qty, maxQty);
+        source.items[ctx.product] -= toMove;
+        source.used -= toMove;
+        shop.shelf.items[ctx.product] = (shop.shelf.items[ctx.product] || 0) + toMove;
+        shop.shelf.used += toMove;
+        updateShopModal();
+        return;
+    }
+
+    if (action === 'toStorage') {
+        const free = shop.storage.capacity - shop.storage.used;
+        if (free <= 0) { await showGameAlert('Склад заполнен!'); return; }
+        const maxQty = Math.min(available, free);
+        const qty = await showGamePrompt('Сколько убрать на склад? (доступно: ' + maxQty + ')', String(maxQty));
+        if (!qty || qty <= 0) return;
+        const toMove = Math.min(qty, maxQty);
+        source.items[ctx.product] -= toMove;
+        source.used -= toMove;
+        shop.storage.items[ctx.product] = (shop.storage.items[ctx.product] || 0) + toMove;
+        shop.storage.used += toMove;
+        updateShopModal();
+        return;
+    }
+
+    if (action === 'toOtherShop') {
+        // Pick target shop
+        const others = shops.filter(s => s.id !== ctx.sourceShopId);
+        if (others.length === 0) { await showGameAlert('Нет других лавок!'); return; }
+        const items = others.map(s => ({ label: s.name }));
+        const idx = await showGameSelect('В какую лавку переместить?', items);
+        if (idx < 0 || idx >= others.length) return;
+        const target = others[idx];
+
+        const free = target.storage.capacity - target.storage.used;
+        if (free <= 0) { await showGameAlert('Склад получателя заполнен!'); return; }
+        const maxQty = Math.min(available, free);
+        const qty = await showGamePrompt('Сколько переместить? (доступно: ' + maxQty + ')', String(maxQty));
+        if (!qty || qty <= 0) return;
+        const toMove = Math.min(qty, maxQty);
+        source.items[ctx.product] -= toMove;
+        source.used -= toMove;
+        target.storage.items[ctx.product] = (target.storage.items[ctx.product] || 0) + toMove;
+        target.storage.used += toMove;
+        updateShopModal();
+        return;
+    }
+});
+
+// Close menu on click outside
+document.addEventListener('click', (e) => {
+    if (itemMenu.classList.contains('open') && !itemMenu.contains(e.target) && !e.target.closest('.shop-item')) {
+        hideItemMenu();
+    }
+});
+
+// Close menu on scroll inside shop modal
+document.getElementById('storageItems').addEventListener('scroll', hideItemMenu);
+document.getElementById('shelfItems').addEventListener('scroll', hideItemMenu);
+
+// ========== Shop Prices Panel (side panel) ==========
+
+const spp = document.getElementById('shopPricesPanel');
+const sppBody = document.getElementById('sppBody');
+const sppShopName = document.getElementById('sppShopName');
+const sppClose = document.getElementById('sppClose');
+
+function updateShopPricesPanel() {
+    const shop = getCurrentShop();
+    if (!shop) { sppBody.innerHTML = ''; return; }
+    sppShopName.textContent = shop.name;
+
+    const st = shop.storage;
+    const sh = shop.shelf;
+    const productNames = new Set();
+    Object.keys(st.items).forEach(k => { if (st.items[k] > 0) productNames.add(k); });
+    Object.keys(sh.items).forEach(k => { if (sh.items[k] > 0) productNames.add(k); });
+    const names = [...productNames];
+
+    if (names.length === 0) {
+        sppBody.innerHTML = '<div class="shop-items-empty">Нет товаров</div>';
+        return;
+    }
+
+    sppBody.innerHTML = names.map(n => {
+        const mp = marketPrices[n];
+        const marketPrice = mp ? mp.currentPrice : '—';
+        const val = shop.sellingPrices ? (shop.sellingPrices[n] || '') : '';
+        return `<div class="spp-row">
+            <div class="spp-row-top">
+                <span class="spp-name">${n}</span>
+                <span class="spp-market">Рынок: ${marketPrice}₽</span>
+            </div>
+            <div class="spp-row-bottom">
+                <input class="spp-input" data-product="${n}" type="number" min="1" value="${val}" placeholder="—">
+                <button class="spp-equal" data-product="${n}" title="Приравнять к рыночной цене">= рынку</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// Save price on input
+sppBody.addEventListener('input', (e) => {
+    const inp = e.target.closest('.spp-input');
+    if (!inp) return;
+    const shop = getCurrentShop();
+    if (!shop) return;
+    const name = inp.dataset.product;
+    const val = parseInt(inp.value, 10);
+    if (!shop.sellingPrices) shop.sellingPrices = {};
+    if (val > 0) {
+        shop.sellingPrices[name] = val;
+    } else {
+        delete shop.sellingPrices[name];
+    }
+});
+
+// Equal to market button
+sppBody.addEventListener('click', (e) => {
+    const btn = e.target.closest('.spp-equal');
+    if (!btn) return;
+    const name = btn.dataset.product;
+    const mp = marketPrices[name];
+    if (!mp) return;
+    const shop = getCurrentShop();
+    if (!shop) return;
+    if (!shop.sellingPrices) shop.sellingPrices = {};
+    shop.sellingPrices[name] = mp.currentPrice;
+    const inp = sppBody.querySelector(`.spp-input[data-product="${name}"]`);
+    if (inp) inp.value = mp.currentPrice;
+});
+
+sppClose.addEventListener('click', () => { hideShopPricesPanel(); });
+
+function showShopPricesPanel() {
+    if (!shopModal.classList.contains('open')) return;
+    updateShopPricesPanel();
+    spp.classList.add('open');
+}
+
+function hideShopPricesPanel() {
+    spp.classList.remove('open');
 }
 
 function upgradeStorage() {
@@ -1272,21 +1618,20 @@ document.getElementById('upgradeStorageBtn').addEventListener('click', upgradeSt
 document.getElementById('upgradeShelfBtn').addEventListener('click', upgradeShelf);
 
 // Event delegation for storage → shelf move buttons
-document.getElementById('storageItems').addEventListener('click', (e) => {
-    const btn = e.target.closest('.shop-item-move');
-    if (btn) moveToShelf(btn.dataset.product);
-});
 
 if (shopModal && shopModalClose) {
     shopModal.addEventListener('click', (e) => {
         if (e.target === shopModal) {
             shopModal.classList.remove('open');
+            hideShopPricesPanel();
         }
     });
     shopModalClose.addEventListener('click', () => {
         shopModal.classList.remove('open');
+        hideShopPricesPanel();
     });
 }
+
 
 // ========== Time System ==========
 
@@ -1330,7 +1675,6 @@ function tickGameTime() {
     const minutes = 5 * timeSpeed;
     gameDate.setTime(gameDate.getTime() + minutes * 60000);
     updateTimeDisplay();
-    moveEntities();
     updatePrices(minutes);
     updateMarketPrices(minutes);
     priceSnapshotTimer += minutes;
@@ -1389,6 +1733,15 @@ function getEntityPos(e) {
     return { x, y };
 }
 
+function applyEntityPos(e) {
+    const pos = getEntityPos(e);
+    if (e.type === 'car') {
+        e.el.style.transform = `translate(${pos.x - 8}px, ${pos.y - 6}px)`;
+    } else {
+        e.el.style.transform = `translate(${pos.x - 3}px, ${pos.y - 5}px)`;
+    }
+}
+
 function initEntities() {
     const layer = document.getElementById('entityLayer');
     if (!layer) return;
@@ -1397,72 +1750,107 @@ function initEntities() {
 
     const carColors = ['#7a7a7a', '#8a6a5a', '#6a7a8a', '#7a7a5a', '#5a7a7a', '#7a6a6a'];
     const carDefs = [
-        { axis: 'h', line: 0, pos: 0, dir: 1, speed: 0.13, ci: 0 },
-        { axis: 'h', line: 1, pos: 8, dir: -1, speed: 0.1, ci: 1 },
-        { axis: 'h', line: 2, pos: 4, dir: 1, speed: 0.11, ci: 2 },
-        { axis: 'v', line: 0, pos: 3, dir: 1, speed: 0.12, ci: 3 },
-        { axis: 'v', line: 1, pos: 7, dir: -1, speed: 0.09, ci: 4 },
-        { axis: 'v', line: 2, pos: 10, dir: -1, speed: 0.1, ci: 5 }
+        { axis: 'h', line: 0, pos: 0, dir: 1, speed: 0.28, ci: 0 },
+        { axis: 'h', line: 1, pos: 8, dir: -1, speed: 0.22, ci: 1 },
+        { axis: 'h', line: 2, pos: 4, dir: 1, speed: 0.25, ci: 2 },
+        { axis: 'v', line: 0, pos: 3, dir: 1, speed: 0.26, ci: 3 },
+        { axis: 'v', line: 1, pos: 7, dir: -1, speed: 0.2, ci: 4 },
+        { axis: 'v', line: 2, pos: 10, dir: -1, speed: 0.23, ci: 5 }
     ];
 
     carDefs.forEach((d, i) => {
         const e = { ...d, type: 'car', color: carColors[d.ci], el: null, id: 'c' + i };
-        const pos = getEntityPos(e);
         e.el = document.createElement('div');
         e.el.className = 'map-entity';
-        e.el.style.left = (pos.x - 8) + 'px';
-        e.el.style.top = (pos.y - 6) + 'px';
         if (e.axis === 'h') {
             e.el.innerHTML = entitySprites.car(e.color, e.dir === 1);
         } else {
             const deg = e.dir === 1 ? 90 : -90;
             e.el.innerHTML = `<svg viewBox="0 0 16 12" width="16" height="12" shape-rendering="crispEdges" style="transform:rotate(${deg}deg)"><rect x="2" y="5" width="12" height="5" fill="${e.color}"/><rect x="3" y="3" width="3" height="3" fill="#555"/><rect x="10" y="3" width="3" height="3" fill="#555"/><rect x="4" y="9" width="2" height="2" fill="#333"/><rect x="10" y="9" width="2" height="2" fill="#333"/></svg>`;
         }
+        applyEntityPos(e);
         layer.appendChild(e.el);
         entities.push(e);
     });
 
     const personDefs = [
-        { axis: 'h', line: 0, pos: 2, dir: 1, speed: 0.05 },
-        { axis: 'h', line: 1, pos: 12, dir: -1, speed: 0.04 },
-        { axis: 'v', line: 0, pos: 6, dir: -1, speed: 0.06 },
-        { axis: 'v', line: 1, pos: 4, dir: 1, speed: 0.05 },
-        { axis: 'h', line: 2, pos: 7, dir: 1, speed: 0.04 },
-        { axis: 'v', line: 2, pos: 9, dir: -1, speed: 0.05 }
+        { axis: 'h', line: 0, pos: 2, dir: 1, speed: 0.11 },
+        { axis: 'h', line: 1, pos: 12, dir: -1, speed: 0.09 },
+        { axis: 'v', line: 0, pos: 6, dir: -1, speed: 0.13 },
+        { axis: 'v', line: 1, pos: 4, dir: 1, speed: 0.1 },
+        { axis: 'h', line: 2, pos: 7, dir: 1, speed: 0.09 },
+        { axis: 'v', line: 2, pos: 9, dir: -1, speed: 0.11 }
     ];
 
     personDefs.forEach((d, i) => {
-        const e = { ...d, type: 'person', el: null, id: 'p' + i };
-        const pos = getEntityPos(e);
+        const e = { ...d, type: 'person', el: null, id: 'p' + i, stopTimer: 0 };
         e.el = document.createElement('div');
         e.el.className = 'map-entity';
-        e.el.style.left = (pos.x - 3) + 'px';
-        e.el.style.top = (pos.y - 5) + 'px';
         e.el.innerHTML = entitySprites.person();
+        applyEntityPos(e);
         layer.appendChild(e.el);
         entities.push(e);
     });
+
+    // Start smooth animation loop
+    if (entityAnimFrame) cancelAnimationFrame(entityAnimFrame);
+    lastEntityTime = 0;
+    entityAnimFrame = requestAnimationFrame(entityAnimLoop);
 }
 
-function moveEntities() {
-    if (timeSpeed === 0) return;
+function isPersonNearMarket(e) {
+    if (e.type !== 'person') return false;
+    const col = e.axis === 'h' ? e.pos : ROADS_V[e.line];
+    const row = e.axis === 'v' ? e.pos : ROADS_H[e.line];
+    if (e.axis === 'h' && (ROADS_H[e.line] === 2 || ROADS_H[e.line] === 6)) {
+        return col >= 3 && col <= 7;
+    }
+    if (e.axis === 'v' && ROADS_V[e.line] === 3) {
+        return row >= 2 && row <= 6;
+    }
+    return false;
+}
+
+// ========== Smooth Entity Animation (rAF) ==========
+
+let entityAnimFrame = null;
+let lastEntityTime = 0;
+
+function entityAnimLoop(timestamp) {
+    if (lastEntityTime === 0) lastEntityTime = timestamp;
+    const dt = Math.min((timestamp - lastEntityTime) / 1000, 0.1);
+    lastEntityTime = timestamp;
+
+    if (entities.length > 0 && timeSpeed > 0) {
+        stepEntities(dt, timeSpeed);
+    }
+
+    entityAnimFrame = requestAnimationFrame(entityAnimLoop);
+}
+
+function stepEntities(dt, speedMult) {
     const maxH = MAP_W - 1;
     const maxV = MAP_H - 1;
 
     entities.forEach(e => {
-        const maxPos = e.axis === 'h' ? maxH : maxV;
-        e.pos += e.dir * e.speed * timeSpeed;
-        if (e.pos > maxPos) e.pos -= maxPos + 1;
-        if (e.pos < -1) e.pos += maxPos + 1;
-
-        const pos = getEntityPos(e);
-        if (e.type === 'car') {
-            e.el.style.left = (pos.x - 8) + 'px';
-            e.el.style.top = (pos.y - 6) + 'px';
-        } else {
-            e.el.style.left = (pos.x - 3) + 'px';
-            e.el.style.top = (pos.y - 5) + 'px';
+        if (e.type === 'person') {
+            if (e.stopTimer > 0) {
+                e.stopTimer -= dt;
+                return;
+            }
+            if (isPersonNearMarket(e) && Math.random() < dt * 0.3) {
+                e.stopTimer = 2 + Math.random() * 3;
+                return;
+            }
         }
+
+        const maxPos = e.axis === 'h' ? maxH : maxV;
+        e.pos += e.dir * e.speed * speedMult * dt;
+
+        if (e.pos > maxPos + 0.5) e.pos -= maxPos + 1;
+        if (e.pos < -0.5) e.pos += maxPos + 1;
+
+        applyEntityPos(e);
     });
 }
 

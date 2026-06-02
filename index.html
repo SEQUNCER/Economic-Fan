@@ -212,6 +212,16 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="gameDialog">
+        <div class="modal-content game-dialog">
+            <div class="shop-modal-header">
+                <h2 class="modal-title" id="gameDialogTitle"></h2>
+            </div>
+            <div class="game-dialog-body" id="gameDialogBody"></div>
+            <div class="game-dialog-actions" id="gameDialogActions"></div>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="chartModal">
         <div class="modal-content chart-modal">
             <div class="shop-modal-header">
@@ -288,6 +298,24 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <div class="shop-prices-panel" id="shopPricesPanel">
+        <div class="shop-prices-panel-header">
+            <span>Цены — <span id="sppShopName"></span></span>
+            <button class="spp-close" id="sppClose">
+                <svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="#e0e0e0" stroke-width="2" stroke-linecap="round"/></svg>
+            </button>
+        </div>
+        <div class="shop-prices-panel-body" id="sppBody"></div>
+    </div>
+
+    <div class="item-menu" id="itemMenu">
+        <div class="item-menu-title" id="itemMenuTitle"></div>
+        <button class="item-menu-btn" data-action="toShelf">→ На полку</button>
+        <button class="item-menu-btn" data-action="toStorage">→ На склад</button>
+        <button class="item-menu-btn" data-action="toOtherShop">→ В другую лавку</button>
+        <button class="item-menu-btn item-menu-danger" data-action="discard">✕ Выбросить</button>
     </div>
 
     <div class="modal-overlay" id="suppliersModal">
